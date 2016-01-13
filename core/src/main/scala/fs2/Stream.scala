@@ -84,7 +84,8 @@ trait Stream[+F[_],+W] extends StreamOps[F,W] {
         _step1[F2,W2](List()).flatMap { step => Pull.output1(step) }.
         // The `doCleanup = false` disables the default `Pull.run` behavior of
         // releasing any resources it acquires when reaching the end of the `Pull`
-        _run0(doCleanup = false, LinkedSet.empty, Pull.Stack.empty[F2,Out,Unit])
+        _run0(stop, Stream.empty, doCleanup = false, LinkedSet.empty,
+              Pull.Stack.empty[F2,Out,Unit])
       // A singleton stream which catches all errors and sets `gate` when it completes
       val s2: Stream[F2,Either[Throwable,Out]] =
         Stream.onComplete(s, Stream.eval_(F2.set(gate)(F2.pure(())))).map(Right(_))
@@ -423,11 +424,16 @@ object Stream extends Streams[Stream] with StreamDerived {
       case hb :: tb => Pull.pure(Step(hb, new Handle(tb, h.underlying)))
     }
 
-  def awaitAsync[F[_],W](h: Handle[F,W])(implicit F: Async[F]) =
+  private[fs2]
+  def awaitAsyncInterruptible[F[_],W](h: Handle[F,W], allowInterrupt: AtomicBoolean, stop: Free[F,Boolean])(implicit F: Async[F]): Pull[F,Nothing,AsyncStep[F,W]] =
     h.buffer match {
-      case List() => h.underlying.stepAsync(new AtomicBoolean(true), Free.pure(false), Free.pure(()))
+      case List() => h.underlying.stepAsync(allowInterrupt, stop, Free.pure(()))
       case hb :: tb => Pull.pure(Future.pure(Pull.pure(Step(hb, new Handle(tb, h.underlying)))))
     }
+
+  def awaitAsync[F[_],W](h: Handle[F,W])(implicit F: Async[F]): Pull[F,Nothing,AsyncStep[F,W]] =
+    sys.error("todo - there should not be any calls to this, all awaitAsyncs are interruptible")
+    // awaitAsyncInterruptible[F,W](h, new AtomicBoolean(true), Free.pure(false))
 
   type Pull[+F[_],+W,+R] = fs2.Pull[F,W,R]
   val Pull = fs2.Pull
