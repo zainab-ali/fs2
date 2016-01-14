@@ -72,9 +72,10 @@ trait Stream[+F[_],+W] extends StreamOps[F,W] {
     Pull[F2,Nothing,Step[Chunk[W2], Handle[F2,W2]]]
 
   private[fs2]
-  final def stepAsync[F2[_],W2>:W](allowInterrupt: AtomicBoolean, stop: Free[Nothing,Boolean])(implicit S: Sub1[F,F2], F2: Async[F2]):
+  final def stepAsync[F2[_],W2>:W](stop: Free[Nothing,Boolean])(implicit S: Sub1[F,F2], F2: Async[F2]):
     Pull[F2,Nothing,Future[F2, Pull[F2,Nothing,Step[Chunk[W2], Handle[F2,W2]]]]]
     = Pull.eval(F2.ref[Unit]).flatMap { gate =>
+      val allowInterrupt = new AtomicBoolean(true)
       // We use `gate` to determine when the asynchronous step has completed
       // Finalizers are not run until the step (running in the background) completes
       type Out = Step[Chunk[W2],Handle[F2,W2]]
@@ -425,9 +426,9 @@ object Stream extends Streams[Stream] with StreamDerived {
     }
 
   private[fs2]
-  def awaitAsyncInterruptible[F[_],W](h: Handle[F,W], allowInterrupt: AtomicBoolean, stop: Free[Nothing,Boolean])(implicit F: Async[F]): Pull[F,Nothing,AsyncStep[F,W]] =
+  def awaitAsyncInterruptible[F[_],W](h: Handle[F,W], stop: Free[Nothing,Boolean])(implicit F: Async[F]): Pull[F,Nothing,AsyncStep[F,W]] =
     h.buffer match {
-      case List() => h.underlying.stepAsync(allowInterrupt, stop)
+      case List() => h.underlying.stepAsync(stop)
       case hb :: tb => Pull.pure(Future.pure(Pull.pure(Step(hb, new Handle(tb, h.underlying)))))
     }
 
