@@ -17,7 +17,7 @@ trait Pull[+F[_],+W,+R] extends PullOps[F,W,R] {
   }
 
   private[fs2]
-  final def _run0[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean,
+  final def _run0[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean,
     tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
     implicit S: Sub1[F,F2]): Stream[F2,W2]
     =
@@ -30,7 +30,7 @@ trait Pull[+F[_],+W,+R] extends PullOps[F,W,R] {
    *     guaranteed to be run at most once before this `Pull` terminates
    *   - `k` is the stack of work remaining.
    */
-  protected def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean,
+  protected def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean,
     tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
     implicit S: Sub1[F,F2]): Stream[F2,W2]
 }
@@ -40,7 +40,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
 
   val done: Pull[Nothing,Nothing,Nothing] = new Pull[Nothing,Nothing,Nothing] {
     type W = Nothing; type R = Nothing
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[Nothing,F2]): Stream[F2,W2]
       = {
       k (
@@ -60,7 +60,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
   def fail(err: Throwable): Pull[Nothing,Nothing,Nothing] = new Pull[Nothing,Nothing,Nothing] {
     self =>
     type W = Nothing; type R = Nothing
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[Nothing,F2]): Stream[F2,W2]
       =
       k (
@@ -79,7 +79,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
 
   def pure[R](a: R): Pull[Nothing,Nothing,R] = new Pull[Nothing,Nothing,R] { self =>
     type W = Nothing
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[Nothing,F2]): Stream[F2,W2]
       =
       k (
@@ -100,14 +100,14 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
    * `pure(()).flatMap { _ => p }`.
    */
   def suspend[F[_],W,R](p: => Pull[F,W,R]): Pull[F,W,R] = new Pull[F,W,R] {
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       =
       try p._run0(stop, beforeCleanup, doCleanup, tracked, k) catch { case t: Throwable => Stream.fail(t) }
   }
 
   def onError[F[_],W,R](p: Pull[F,W,R])(handle: Throwable => Pull[F,W,R]) = new Pull[F,W,R] {
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       = {
         val handle2: Throwable => Pull[F2,W,R] = handle andThen (Sub1.substPull(_))
@@ -116,7 +116,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
   }
 
   def flatMap[F[_],W,R0,R](p: Pull[F,W,R0])(f: R0 => Pull[F,W,R]) = new Pull[F,W,R] {
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       = {
         val f2: R0 => Pull[F2,W,R] = f andThen (Sub1.substPull(_))
@@ -126,7 +126,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
 
   def eval[F[_],R](f: F[R]): Pull[F,Nothing,R] = new Pull[F,Nothing,R] {
     type W = Nothing
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       =
       Stream.eval(S(f)) flatMap { r => pure(r)._run0(stop, beforeCleanup, doCleanup, tracked, k) }
@@ -134,7 +134,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
 
   def acquire[F[_],R](id: Token, r: F[R], cleanup: R => F[Unit]): Pull[F,Nothing,R] = new Pull[F,Nothing,R] {
     type W = Nothing
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       =
       Stream.flatMap (Sub1.substStream(Stream.acquire(id, r, cleanup))) {
@@ -144,14 +144,14 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
 
   def outputs[F[_],W](s: Stream[F,W]) = new Pull[F,W,Unit] {
     type R = Unit
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       =
       Sub1.substStream(s).append(pure(())._run1(stop, beforeCleanup, doCleanup, tracked, k))
   }
 
   def or[F[_],W,R](p1: Pull[F,W,R], p2: => Pull[F,W,R]): Pull[F,W,R] = new Pull[F,W,R] {
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[F,F2]): Stream[F2,W2]
       =
       Sub1.substPull(p1)._run0(stop, beforeCleanup, doCleanup, tracked, k.pushOr(() => Sub1.substPull(p2)))
@@ -160,9 +160,20 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
   def run[F[_],W,R](p: Pull[F,W,R]): Stream[F,W] = p.run
 
   private[fs2]
+  def interruptStatus: Pull[Nothing,Nothing,Free[Nothing,Boolean]]
+  = new Pull[Nothing,Nothing,Free[Nothing,Boolean]] {
+    type W = Nothing; type R = Free[Nothing,Boolean]
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing],
+      doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+      implicit S: Sub1[Nothing,F2]): Stream[F2,W2]
+      =
+      pure(stop)._run0(stop, beforeCleanup, doCleanup, tracked, k)
+  }
+
+  private[fs2]
   def track(id: Token): Pull[Nothing,Nothing,Unit] = new Pull[Nothing,Nothing,Unit] {
     type W = Nothing; type R = Unit
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[Nothing,F2]): Stream[F2,W2]
       =
       pure(())._run0(stop, beforeCleanup, doCleanup, tracked + id, k)
@@ -171,7 +182,7 @@ object Pull extends Pulls[Pull] with PullDerived with pull1 with pull2 {
   private[fs2]
   def release(id: Token): Pull[Nothing,Nothing,Unit] = new Pull[Nothing,Nothing,Unit] {
     type W = Nothing; type R = Unit
-    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[F2,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
+    def _run1[F2[_],W2>:W,R1>:R,R2](stop: Free[Nothing,Boolean], beforeCleanup: Stream[F2,Nothing], doCleanup: Boolean, tracked: LinkedSet[Token], k: Stack[F2,W2,R1,R2])(
       implicit S: Sub1[Nothing,F2]): Stream[F2,W2]
       =
       Stream.release(id) ++ pure(())._run0(stop, beforeCleanup, doCleanup, tracked - id, k)
