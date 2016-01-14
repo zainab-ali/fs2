@@ -434,7 +434,7 @@ object Stream extends Streams[Stream] with StreamDerived {
 
   def awaitAsync[F[_],W](h: Handle[F,W])(implicit F: Async[F]): Pull[F,Nothing,AsyncStep[F,W]] =
     Pull.interruptStatus.flatMap { stop =>
-      awaitAsyncInterruptible(h, new AtomicBoolean(true), stop)
+      awaitAsyncInterruptible(h, stop)
     }
 
   type Pull[+F[_],+W,+R] = fs2.Pull[F,W,R]
