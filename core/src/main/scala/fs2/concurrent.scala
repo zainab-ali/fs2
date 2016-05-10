@@ -42,7 +42,7 @@ object concurrent {
       def pumpInner(s: Handle[F,O]): Pull[F,Nothing,Unit] = s.awaitAsync.flatMap { f =>
         Pull.eval(F.start { F.bind(f.get) { p => q.enqueue1(InnerStep(p._1, p._2)) }}) as (())
       }
-      Pull.eval(q.dequeue1).flatMap { // todo - make this dequeue interruptible
+      Pull.eval(q.dequeue1).flatMap {
         case NewInnerStream(newS,onForce) => Pull.evalScope(onForce) >>
           newS.flatMap {
             case None #: _ => go(outerDone = true, q, open)
