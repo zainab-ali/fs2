@@ -1,113 +1,63 @@
 package fs2
 
-import fs2.util.{Attempt,Free,RealSupertype,Sub1,~>}
-import fs2.StreamCore.{Env,Algebra,AlgebraF,Token}
-
 /**
- * Tracks resources acquired while running a stream.
- *
- * Note: `Scope` is not typically used directly by user code.
- */
-final class Scope[+F[_],+O] private (private val get: Free[AlgebraF[F]#f,O]) {
+  * Represents a period of stream execution in which resources are acquired and released.
+  *
+  * Note: this type is generally used to implement low-level actions that manipulate
+  * resource lifetimes and hence, isn't generally used by user-level code.
+  */
+abstract class Scope[F[_]] {
 
-  def as[O2](o2: O2): Scope[F,O2] = map(_ => o2)
+  /**
+    * Leases the resources of this scope until the returned lease is cancelled.
+    *
+    * Note that this leases all resources in this scope, resources in all parent scopes (up to root)
+    * and resources of all child scopes.
+    *
+    * `None` is returned if this scope is already closed. Otherwise a lease is returned,
+    * which must be cancelled. Upon cancellation, resource finalizers may be run, depending on the
+    * state of the owning scopes.
+    *
+    * Resources may be finalized during the execution of this method and before the lease has been acquired
+    * for a resource. In such an event, the already finalized resource won't be leased. As such, it is
+    * important to call `lease` only when all resources are known to be non-finalized / non-finalizing.
+    *
+    * When the lease is returned, all resources available at the time `lease` was called have been
+    * successfully leased.
+    */
+  def lease: F[Option[Scope.Lease[F]]]
 
-  def map[O2](f: O => O2): Scope[F,O2] = new Scope(get map f)
+  /**
+    * Interrupts evaluation of the current scope. Only scopes previously indicated with Stream.interruptScope may be interrupted.
+    * For other scopes this will fail.
+    *
+    * Interruption is final and may take two forms:
+    *
+    * When invoked on right side, that will interrupt only current scope evaluation, and will resume when control is given
+    * to next scope.
+    *
+    * When invoked on left side, then this will inject given throwable like it will be caused by stream evaluation,
+    * and then, without any error handling the whole stream will fail with supplied throwable.
+    *
+    */
+  def interrupt(cause: Either[Throwable, Unit]): F[Unit]
 
-  def flatMap[F2[x]>:F[x],O2](f: O => Scope[F2,O2]): Scope[F2,O2] =
-    new Scope(get.flatMap[AlgebraF[F2]#f,O2](o => f(o).get))
-
-  def translate[G[_]](f: F ~> G): Scope[G,O] = new Scope(Free.suspend[AlgebraF[G]#f,O] {
-    get.translate[AlgebraF[G]#f](new (AlgebraF[F]#f ~> AlgebraF[G]#f) {
-      def apply[A](r: Algebra[F,A]) = r match {
-        case Algebra.Eval(fa) => Algebra.Eval(f(fa))
-        case Algebra.FinishAcquire(token, cleanup) => Algebra.FinishAcquire(token, cleanup.translate(f))
-        case _ => r.asInstanceOf[Algebra[G,A]] // Eval and FinishAcquire are only ctors that flatMap `F`
-      }
-    })
-  })
-
-  def attempt: Scope[F,Attempt[O]] = new Scope(get.attempt)
-
-  def bindEnv[F2[_]](env: Env[F2])(implicit S: Sub1[F,F2]): Free[F2,(List[Token],O)] = Free.suspend {
-    type FO[x] = Free[F2,(List[Token],x)]
-    get.fold[AlgebraF[F]#f,FO,O](new Free.Fold[AlgebraF[F]#f,FO,O] {
-      def suspend(g: => FO[O]) = Free.suspend(g)
-      def done(r: O) = Free.pure((Nil,r))
-      def fail(t: Throwable) = Free.fail(t)
-      def eval[X](i: AlgebraF[F]#f[X])(g: Attempt[X] => FO[O]) = i match {
-        case Algebra.Eval(fx) => Free.attemptEval(S(fx)) flatMap g
-        case Algebra.Interrupted => g(Right(env.interrupted()))
-        case Algebra.Snapshot => g(Right(env.tracked.snapshot))
-        case Algebra.NewSince(tokens) => g(Right(env.tracked.newSince(tokens)))
-        case Algebra.Release(tokens) => env.tracked.release(tokens) match {
-          case None =>
-            g(Left(new RuntimeException("attempting to release resources still in process of being acquired")))
-          case Some((rs,leftovers)) =>
-            if (leftovers.isEmpty) StreamCore.runCleanup(rs) flatMap { e => g(Right(e)) }
-            else StreamCore.runCleanup(rs) flatMap { e => g(Right(e)) map { case (ts,o) => (leftovers ++ ts, o) } }
-        }
-        case Algebra.StartAcquire(token) =>
-          g(Right(env.tracked.startAcquire(token)))
-        case Algebra.FinishAcquire(token, c) =>
-          g(Right(env.tracked.finishAcquire(token, Sub1.substFree(c))))
-        case Algebra.CancelAcquire(token) =>
-          env.tracked.cancelAcquire(token)
-          g(Right(()))
-      }
-      def bind[X](r: X)(g: X => FO[O]) = g(r)
-    })(Sub1.sub1[AlgebraF[F]#f],implicitly[RealSupertype[O,O]])
-  }
-
-  override def toString = s"Scope(..)"
 }
 
 object Scope {
-  def suspend[F[_],O](s: => Scope[F,O]): Scope[F,O] = pure(()) flatMap { _ => s }
 
-  def pure[F[_],O](o: O): Scope[F,O] = new Scope(Free.pure(o))
+  /**
+    * Represents one or more resources that were leased from a scope, causing their
+    * lifetimes to be extended until `cancel` is invoked on this lease.
+    */
+  abstract class Lease[F[_]] {
 
-  def attemptEval[F[_],O](o: F[O]): Scope[F,Attempt[O]] =
-    new Scope(Free.attemptEval[AlgebraF[F]#f,O](Algebra.Eval(o)))
-
-  def eval[F[_],O](o: F[O]): Scope[F,O] =
-    attemptEval(o) flatMap { _.fold(fail, pure) }
-
-  def evalFree[F[_],O](o: Free[F,O]): Scope[F,O] =
-    new Scope(o.translate[AlgebraF[F]#f](new (F ~> AlgebraF[F]#f) { def apply[x](f: F[x]) = Algebra.Eval(f) }))
-
-  def fail[F[_],O](err: Throwable): Scope[F,O] =
-    new Scope(Free.fail(err))
-
-  def interrupted[F[_]]: Scope[F,Boolean] =
-    new Scope(Free.eval[AlgebraF[F]#f,Boolean](Algebra.Interrupted))
-
-  def snapshot[F[_]]: Scope[F,Set[Token]] =
-    new Scope(Free.eval[AlgebraF[F]#f,Set[Token]](Algebra.Snapshot))
-
-  def newSince[F[_]](snapshot: Set[Token]): Scope[F,List[Token]] =
-    new Scope(Free.eval[AlgebraF[F]#f,List[Token]](Algebra.NewSince(snapshot)))
-
-  def release[F[_]](tokens: List[Token]): Scope[F,Attempt[Unit]] =
-    new Scope(Free.eval[AlgebraF[F]#f,Attempt[Unit]](Algebra.Release(tokens)))
-
-  def startAcquire[F[_]](token: Token): Scope[F,Boolean] =
-    new Scope(Free.eval[AlgebraF[F]#f,Boolean](Algebra.StartAcquire(token)))
-
-  def finishAcquire[F[_]](token: Token, cleanup: Free[F,Attempt[Unit]]): Scope[F,Boolean] =
-    new Scope(Free.eval[AlgebraF[F]#f,Boolean](Algebra.FinishAcquire(token, cleanup)))
-
-  def acquire[F[_]](token: Token, cleanup: Free[F,Attempt[Unit]]): Scope[F,Attempt[Unit]] =
-    startAcquire(token) flatMap { ok =>
-      if (ok) finishAcquire(token, cleanup).flatMap { ok =>
-        if (ok) Scope.pure(Right(())) else evalFree(cleanup)
-      }
-      else evalFree(cleanup)
-    }
-
-  def cancelAcquire[F[_]](token: Token): Scope[F,Unit] =
-    new Scope(Free.eval[AlgebraF[F]#f,Unit](Algebra.CancelAcquire(token)))
-
-  def traverse[F[_],A,B](l: List[A])(f: A => Scope[F,B]): Scope[F,List[B]] =
-    l.foldRight(Scope.pure[F,List[B]](List()))((hd,tl) => f(hd) flatMap { b => tl map (b :: _) })
+    /**
+      * Cancels the lease of all resources tracked by this lease.
+      *
+      * This may run finalizers on some of the resources (depending on the state of their owning scopes).
+      * If one or more finalizers fail, the returned action completes with a `Left(t)`, providing the failure.
+      */
+    def cancel: F[Either[Throwable, Unit]]
+  }
 }
