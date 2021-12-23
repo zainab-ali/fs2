@@ -3806,37 +3806,26 @@ object Stream extends StreamLowPriority {
       for {
         guard <- Semaphore[F](maxQueued - 1L)
         outChan <- Channel.unbounded[F, Chunk[O]]
-        sinkChan <- Channel.unbounded[F, Chunk[O]]
       } yield {
-
-        val sinkIn: Stream[F, INothing] = {
-          def go(s: Stream[F, O]): Pull[F, INothing, Unit] =
-            s.pull.uncons.flatMap {
-              case None           => Pull.eval(sinkChan.close.void)
-              case Some((hd, tl)) => Pull.eval(sinkChan.send(hd) >> guard.acquire) >> go(tl)
-            }
-
-          go(self).stream
-        }
 
         val sinkOut: Stream[F, O] = {
           def go(s: Stream[F, Chunk[O]]): Pull[F, O, Unit] =
             s.pull.uncons1.flatMap {
               case None => Pull.done
               case Some((ch, rest)) =>
-                Pull.output(ch) >> Pull.eval(outChan.send(ch)) >> go(rest)
+                Pull.output(ch) >> Pull.eval(outChan.send(ch) >> guard.acquire) >> go(rest)
             }
 
-          go(sinkChan.stream).stream
+          go(self.chunks).stream
         }
 
         val runner =
-          sinkOut.through(pipe).concurrently(sinkIn) ++ Stream.exec(outChan.close.void)
+          sinkOut.through(pipe).onFinalize(outChan.close.void)
 
         def outStream =
           outChan.stream
             .flatMap { chunk =>
-              Stream.chunk(chunk) ++ Stream.exec(guard.release)
+              Stream.chunk(chunk).onFinalize(guard.release)
             }
 
         outStream.concurrently(runner)
